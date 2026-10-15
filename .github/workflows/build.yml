@@ -1,0 +1,27 @@
+name: Build AEmulatorGreen.apk
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: unzip -q AEmulator-Green-main.zip -d src
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0"
+      - name: Build
+        working-directory: src/AEmulator-Green-main
+        run: |
+          keytool -genkeypair -keystore release.jks -alias temp -keyalg RSA -keysize 2048 -validity 10000 -storepass temporary-pass -keypass temporary-pass -dname "CN=AEmulator Green"
+          printf 'storeFile=release.jks\nstorePassword=temporary-pass\nkeyAlias=temp\nkeyPassword=temporary-pass\n' > keystore.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon copyReleaseApks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AEmulatorGreen
+          path: src/AEmulator-Green-main/release-apks/AEmulatorGreen.apk

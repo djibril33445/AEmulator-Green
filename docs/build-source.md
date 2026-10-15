@@ -1,0 +1,89 @@
+# Building AEmulator Green
+
+Updated 2026-10-11. AEmulator Green is a modified fork of
+[drel4/AEmulator-Sunset](https://github.com/drel4/AEmulator-Sunset) (itself a fork of
+[uxazu/AEmulator](https://github.com/uxazu/AEmulator)); see [NOTICE.md](../NOTICE.md).
+Replace `<tag>` below with the Plus release tag you want to build.
+
+## Application APKs (uses checked-in engine prebuilts)
+
+The release tag identifies the application source, Gradle configuration and
+bundled assets used for that release. This builds the app, **not every engine
+component from source**; see [the outstanding audit](license-audit.md).
+
+The tested Linux release environment uses JDK 21, Android SDK platform 36,
+build-tools 36.0.0 and Gradle 8.14.2 (the checked-in wrapper). Kotlin/Java
+bytecode targets Java 17. First-time builds need network access to resolve the
+dependencies pinned in `build.gradle.kts` and `app/build.gradle.kts`.
+
+```sh
+git clone https://github.com/djibril33445/AEmulator-Green.git
+cd AEmulator-Green
+git checkout <tag>
+export JAVA_HOME=/path/to/jdk-21
+export ANDROID_HOME=/path/to/Android/Sdk
+sh gradlew --no-daemon '-Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8' \
+  -Pkotlin.compiler.execution.strategy=in-process --max-workers=1 \
+  testReleaseUnitTest assembleRelease
+```
+
+Output: `app/build/outputs/apk/release/`. The package is `app.aemu.green` (there is no clone
+variant); it installs next to Sunset (`app.aemu`) and cannot update it. It requires an
+arm64-v8a Android host, API 26 or newer. `./gradlew copyReleaseApks` copies the APK to
+`release-apks/AEmulatorGreen.apk`.
+
+Release signing uses private, untracked `keystore.properties`. Without it,
+release APKs are unsigned. To test/install without the publisher's key, build
+`assembleDebug` using your own debug key, or
+sign an unsigned release APK with your own key using Android `apksigner`.
+Your differently signed APK cannot update the publisher-signed installation.
+No publisher credentials are needed to compile or run your own build.
+
+## Fork native/helper source
+
+These scripts overwrite the corresponding bundled binaries; run them only in
+a build checkout. Sunset's tested guest-native toolchain is NDK
+`22.1.7171670` on Linux. The current APK build does not rebuild native assets
+automatically. Rebuilding may change binary hashes; byte-for-byte APK
+reproducibility has not been established.
+
+```sh
+export NDK="$ANDROID_HOME/ndk/22.1.7171670"
+(cd native/guestshim && sh build.sh)
+(cd native/audiohal && sh build.sh)
+(cd native/camerahal && sh build.sh)
+(cd native/sensorhal && sh build.sh)
+sh native/setupctl/build.sh
+```
+
+- `guestshim`: preload shim, recovery shim and `aemu_true.so`.
+- `audiohal`: AOSP, Sony DIRECTTRACK, ICS/Qualcomm and MTK audio HAL variants.
+  `native/audiohal/build-zig.sh` is a fallback that builds the same six
+  libraries with `zig cc` (Thumb-2, LLVM) for environments without the NDK;
+  it links against stub `libc.so`/`libdl.so` carrying the `@LIBC` symbol
+  versions bionic expects. Guest microphone input (`/dev/aemu_mic`, host side
+  in `app/.../core/MicBridge.kt`) ships in these libraries.
+- `camerahal`: `camera.aemu_host.so`, the experimental HAL1 bridge.
+- `sensorhal`: `sensors.aemu_host.so`, the experimental legacy motion-sensor
+  bridge. Its host transport/lifecycle smoke test is `sh native/sensorhal/tests/run.sh`
+  and requires a C compiler with ASan/UBSan (no guest firmware needed).
+- `setupctl`: `aemu-setup.jar`, setup and guest rotation helpers;
+  requires SDK 36/d8 and JDK 17+.
+- Additional upstream source-backed scripts: `native/hostjni`, `native/apwrap`,
+  `native/glsplit`, `native/gueststubs`. Read their scripts and requirements;
+  do not mistake these for a complete engine build.
+
+JVM tests run via `testReleaseUnitTest`. Guest shim/audio/camera smoke
+tests have `tests/run.sh` scripts and require `qemu-arm` plus an ARM cross
+compiler (the audio test also runs under `native/audiohal/tests/run_arm.py`,
+a Unicorn-based runner for machines without `qemu-arm`; it needs python3 with
+`pyelftools` and `unicorn`); camera Bionic tests also require a separately supplied stock guest
+fixture and user/PID namespace support (see `native/camerahal/README.md`).
+Setup policy tests are in `native/setupctl/tests/PolicyTest.java`.
+
+## Source access beside downloads
+
+Release notes link the exact tagged checkout, this document and the audit.
+GitHub's tag source archives include the source tracked in that checkout, but
+cannot supply components absent from Git. Preserve license notices and make
+required source/build materials available when redistributing your own build.
